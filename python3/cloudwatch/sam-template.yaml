@@ -43,6 +43,11 @@ Parameters:
     Description: "Enriches the CloudWatch events with custom properties at ship time. The format is `key1=value1;key2=value2`. By default is empty."
     Default: ""
 
+  MaxLogSize:
+    Type: Number
+    Description: "Maximum size of the log which needs to be push to Logzio"
+    Default: 10000
+
 Outputs:
     LogzioCloudwatchLogsLambda:
       Description: "Logz.io CW logs lambda ARN"
@@ -67,3 +72,4 @@ Resources:
           FORMAT: !Ref LogzioFORMAT
           COMPRESS: !Ref LogzioCOMPRESS
           ENRICH: !Ref LogzioENRICH
+          MAX_LOG_SIZE: !Ref MaxLogSize
