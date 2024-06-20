@@ -3,6 +3,7 @@ import gzip
 import json
 import logging
 import os
+import re
 from io import BytesIO
 
 from python3.shipper.shipper import LogzioShipper
@@ -16,7 +17,6 @@ LOG_LEVELS = ['alert', 'trace', 'debug', 'notice', 'info', 'warn',
 PYTHON_EVENT_SIZE = 3
 NODEJS_EVENT_SIZE = 4
 LAMBDA_LOG_GROUP = '/aws/lambda/'
-
 
 # set logger
 logger = logging.getLogger()
@@ -67,6 +67,11 @@ def _add_timestamp(log):
         del log['timestamp']
 
 
+def remove_ansi_escape_codes(text):
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', text)
+
+
 def _parse_to_json(log):
     # type: (dict) -> None
     try:
@@ -74,12 +79,26 @@ def _parse_to_json(log):
             json_object = json.loads(log['message'])
             for key, value in json_object.items():
                 log[key] = value
-            log['app'] = log['kubernetes']['container_name']
             log['original_message'] = log['message']
+            application = log['app']
+            log['app'] = log['kubernetes']['container_name']
 
-            if 'log' in log:
-                log['message'] = log['log']
-                del log['log']
+            if 'vhost' in log and 'request' in log and 'status' in log:
+                url = f"{log['vhost']}{log['request']}"
+                duration = log.get('duration', '')
+                status = log.get('status', '')
+                bytes_sent = log.get('bytes_sent', '')
+                log['application'] = application
+                log['message'] = f"{url} status = {status} duration = {duration} bytes sent = {bytes_sent}"
+            elif 'log' in log:
+                log_string = log['log']
+                try:
+                    log_json = json.loads(log_string)
+                    log['message'] = remove_ansi_escape_codes(log_json.get('message', ''))
+                except (KeyError, ValueError) as e:
+                    log['message'] = remove_ansi_escape_codes(log_string)
+                    pass
+
     except (KeyError, ValueError) as e:
         pass
 
@@ -92,7 +111,7 @@ def _parse_cloudwatch_log(log, additional_data):
             _extract_lambda_log_message(log)
         else:
             return False
-    if not(_filter_out_by_log_stream_name(additional_data)):
+    if not (_filter_out_by_log_stream_name(additional_data)):
         log.update(additional_data)
         _parse_to_json(log)
         return True
