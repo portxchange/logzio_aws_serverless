@@ -74,17 +74,12 @@ def _parse_to_json(log):
             json_object = json.loads(log['message'])
             for key, value in json_object.items():
                 log[key] = value
+            log['app'] = log['kubernetes']['container_name']
+            log['original_message'] = log['message']
 
-            # Specific to PXP: for backward compatible adjusting json
-            if 'log_processed' in log and 'message' in log['log_processed']:
-                original_message = log['message']
-                log['original_message'] = original_message
-                log['message'] = log['log_processed']['message']
-                log['log_level'] = log['log_processed']['log_level']
-                log['logger'] = log['log_processed']['logger']
-                log['app'] = log['kubernetes']['container_name']
-                del log['log_processed']
-                # Specific to PXP:
+            if 'log' in log:
+                log['message'] = log['log']
+                del log['log']
     except (KeyError, ValueError) as e:
         pass
 
