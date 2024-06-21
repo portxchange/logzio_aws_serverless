@@ -17,6 +17,7 @@ LOG_LEVELS = ['alert', 'trace', 'debug', 'notice', 'info', 'warn',
 PYTHON_EVENT_SIZE = 3
 NODEJS_EVENT_SIZE = 4
 LAMBDA_LOG_GROUP = '/aws/lambda/'
+pattern = r"\[(.*)\] - (.*) - (.*)"
 
 # set logger
 logger = logging.getLogger()
@@ -72,6 +73,30 @@ def remove_ansi_escape_codes(text):
     return ansi_escape.sub('', text)
 
 
+def safe_get(dictionary, key):
+    return dictionary.get(key, '')
+
+
+def _handle_nginx_controller_logs(log, original_app):
+    request_url = f"{log['vhost']}{log['request']}"
+    duration = safe_get(log, 'duration')
+    status = safe_get(log, 'status')
+    bytes_sent = safe_get(log, 'bytes_sent')
+    log['original_app'] = original_app
+    log['message'] = f"{request_url} status = {status} duration = {duration} bytes sent = {bytes_sent}"
+
+
+def _handle_json_log_message(log, log_json):
+    log['message'] = remove_ansi_escape_codes(safe_get(log_json, 'message'))
+
+
+def _parse_pronto_logs_with_regular_expression(log, log_line):
+    match = re.match(pattern, log_line)
+    log['log_level'] = match.group(1).upper()
+    log['logger'] = match.group(2)
+    log['message'] = match.group(3)
+
+
 def _parse_to_json(log):
     # type: (dict) -> None
     try:
@@ -80,25 +105,26 @@ def _parse_to_json(log):
             for key, value in json_object.items():
                 log[key] = value
             log['original_message'] = log['message']
-            application = log['app']
+            original_app = safe_get(log, 'app')
+
+            # in the case of nginx-ingress-controller, original requested app name captured as original_app
             log['app'] = log['kubernetes']['container_name']
 
             if 'vhost' in log and 'request' in log and 'status' in log:
-                url = f"{log['vhost']}{log['request']}"
-                duration = log.get('duration', '')
-                status = log.get('status', '')
-                bytes_sent = log.get('bytes_sent', '')
-                log['application'] = application
-                log['message'] = f"{url} status = {status} duration = {duration} bytes sent = {bytes_sent}"
+                _handle_nginx_controller_logs(log, original_app)
             elif 'log' in log:
                 log_string = log['log']
                 try:
                     log_json = json.loads(log_string)
-                    log['message'] = remove_ansi_escape_codes(log_json.get('message', ''))
+                    _handle_json_log_message(log, log_json)
                 except (KeyError, ValueError) as e:
-                    log['message'] = remove_ansi_escape_codes(log_string)
-                    pass
-
+                    log_line = remove_ansi_escape_codes(log_string)
+                    try:
+                        _parse_pronto_logs_with_regular_expression(log, log_line)
+                    except (KeyError, ValueError) as e:
+                        log['message'] = log_line
+                        pass
+                del log['log']
     except (KeyError, ValueError) as e:
         pass
 
