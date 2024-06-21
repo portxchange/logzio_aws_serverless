@@ -84,6 +84,7 @@ def _handle_nginx_controller_logs(log, original_app):
     bytes_sent = safe_get(log, 'bytes_sent')
     log['original_app'] = original_app
     log['message'] = f"{request_url} status = {status} duration = {duration} bytes sent = {bytes_sent}"
+    del log['log']
 
 
 def _handle_json_log_message(log, log_json):
